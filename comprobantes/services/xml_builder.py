@@ -5,6 +5,7 @@ de un Comprobante + sus DetalleComprobante.
 """
 
 from lxml import etree
+from django.utils import timezone
 
 
 def _sub(parent, tag, texto=''):
@@ -46,7 +47,7 @@ def construir_xml_factura(emisor, comprobante, detalles, resumen_por_tarifa, for
 
     # ---- infoFactura ----
     info_factura = etree.SubElement(factura, 'infoFactura')
-    _sub(info_factura, 'fechaEmision', comprobante.creado_en.strftime('%d/%m/%Y'))
+    _sub(info_factura, 'fechaEmision', timezone.localtime(comprobante.creado_en).strftime('%d/%m/%Y'))
     _sub(info_factura, 'dirEstablecimiento', emisor.direccion_establecimiento)
     if emisor.contribuyente_especial:
         _sub(info_factura, 'contribuyenteEspecial', emisor.contribuyente_especial)

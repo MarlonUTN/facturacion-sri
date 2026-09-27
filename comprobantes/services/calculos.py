@@ -1,11 +1,17 @@
 """
 Calculos de linea de venta para el SRI.
 
-Tu POS guarda el precio de cada producto YA CON el IVA incluido cuando
-el producto tiene IVA (15%), y el precio "tal cual" cuando no tiene
-(0%). El SRI, en cambio, pide en el XML el precio SIN impuesto y el
-valor del IVA por separado. Por eso hay que "desarmar" el precio antes
-de armar el detalle.
+CONTRATO: el POS manda el precio unitario SIN IVA (precio base, antes
+de impuestos) -- que es como la mayoria de sistemas de punto de venta
+en Ecuador guardan sus precios internamente (incluido el POS de
+Marlon: Product.sale_price = "Precio base sin IVA"). El SRI tambien
+pide la base imponible en el XML, asi que no hace falta ninguna
+conversion: se toma el precio tal cual llega.
+
+Si en el futuro este microservicio se conecta a un POS que SI guarda
+precios con IVA incluido, la conversion (precio_final / 1.15) se hace
+del lado del adaptador de ESE POS antes de llamar a este endpoint --
+no aqui. Este modulo asume siempre precio base.
 
 Tabla de codigoPorcentaje del SRI (ficha tecnica de comprobantes
 electronicos, catalogo de IVA vigente desde la reforma de abril 2024):
@@ -22,40 +28,29 @@ CODIGO_PORCENTAJE_IVA_15 = '4'
 CODIGO_PORCENTAJE_IVA_0 = '0'
 
 DOS_DECIMALES = Decimal('0.01')
-SEIS_DECIMALES = Decimal('0.000001')
 
 
 def _redondear(valor, exp=DOS_DECIMALES):
     return Decimal(valor).quantize(exp, rounding=ROUND_HALF_UP)
 
 
-def calcular_linea(precio_unitario_final, cantidad, tiene_iva, descuento=0):
+def calcular_linea(precio_unitario_sin_impuesto, cantidad, tiene_iva, descuento=0):
     """
-    precio_unitario_final: precio tal como esta guardado en tu POS
-        (ya incluye IVA si tiene_iva=True).
+    precio_unitario_sin_impuesto: precio BASE (sin IVA), tal como lo
+        guarda el POS (ej. Product.sale_price).
     cantidad: cantidad vendida.
-    tiene_iva: bool, viene del campo que ya tienes en tu producto.
+    tiene_iva: bool -- True si el producto grava 15%, False si es 0%.
     descuento: descuento en dinero aplicado a la linea (no porcentaje).
 
     Devuelve un dict listo para guardar en DetalleComprobante y para
     alimentar el XML builder.
     """
-    precio_unitario_final = Decimal(str(precio_unitario_final))
+    precio_unitario_sin_impuesto = _redondear(Decimal(str(precio_unitario_sin_impuesto)), Decimal('0.000001'))
     cantidad = Decimal(str(cantidad))
     descuento = Decimal(str(descuento))
 
-    if tiene_iva:
-        # El precio final = base * 1.15  =>  base = final / 1.15
-        precio_unitario_sin_impuesto = _redondear(
-            precio_unitario_final / (Decimal('1') + TARIFA_IVA / Decimal('100')),
-            SEIS_DECIMALES,
-        )
-        codigo_porcentaje = CODIGO_PORCENTAJE_IVA_15
-        tarifa = TARIFA_IVA
-    else:
-        precio_unitario_sin_impuesto = precio_unitario_final
-        codigo_porcentaje = CODIGO_PORCENTAJE_IVA_0
-        tarifa = Decimal('0.00')
+    codigo_porcentaje = CODIGO_PORCENTAJE_IVA_15 if tiene_iva else CODIGO_PORCENTAJE_IVA_0
+    tarifa = TARIFA_IVA if tiene_iva else Decimal('0.00')
 
     precio_total_sin_impuesto = _redondear(
         precio_unitario_sin_impuesto * cantidad - descuento

@@ -26,4 +26,5 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('health/', health_check, name='health-check'),
     path('api/emisores/', include('emisores.urls')),
+    path('api/comprobantes/', include('comprobantes.urls')),
 ]

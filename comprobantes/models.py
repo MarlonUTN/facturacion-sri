@@ -1,4 +1,5 @@
 from django.db import models
+from django.core.serializers.json import DjangoJSONEncoder
 from emisores.models import Emisor
 
 
@@ -41,7 +42,7 @@ class Comprobante(models.Model):
     total_iva = models.DecimalField(max_digits=12, decimal_places=2)
     importe_total = models.DecimalField(max_digits=12, decimal_places=2)
 
-    payload_original = models.JSONField()
+    payload_original = models.JSONField(encoder=DjangoJSONEncoder)
 
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default=ESTADO_CREADO)
     xml_generado = models.TextField(blank=True)
