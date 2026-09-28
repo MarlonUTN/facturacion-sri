@@ -102,7 +102,7 @@ def generar_ride(emisor, comprobante, detalles) -> bytes:
     elementos.append(Spacer(1, 4 * mm))
 
     # ---- Datos del comprador ----
-    fecha_emision = comprobante.creado_en.strftime('%d/%m/%Y')
+    fecha_emision = timezone.localtime(comprobante.creado_en).strftime('%d/%m/%Y')
     datos_comprador = [
         [Paragraph(f'<b>Razón Social / Nombres y Apellidos:</b> {comprobante.razon_social_comprador}', estilo_normal)],
         [Paragraph(
