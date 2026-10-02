@@ -187,5 +187,9 @@ def generar_ride(emisor, comprobante, detalles) -> bytes:
     tabla_pie.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'TOP')]))
     elementos.append(tabla_pie)
 
+    if emisor.es_rimpe_emprendedor:
+        elementos.append(Spacer(1, 3 * mm))
+        elementos.append(Paragraph('CONTRIBUYENTE RÉGIMEN RIMPE', estilo_negrita))
+
     doc.build(elementos)
     return buffer.getvalue()

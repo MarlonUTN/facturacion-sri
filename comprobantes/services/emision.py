@@ -1,22 +1,7 @@
-"""
-Orquesta la emision completa de un comprobante a partir del contrato
-generico que cualquier POS le manda a este microservicio:
 
-    {
-      "referencia_externa": "VENTA-000456",
-      "cliente": {...opcional...},
-      "items": [{"codigo", "descripcion", "cantidad",
-                 "precio_unitario_sin_impuesto", "tiene_iva", "descuento"}],
-      "pagos": [{"forma_pago": "efectivo", "total": 1.95,
-                 "plazo": null, "unidad_tiempo": null}]
-    }
-
-Este es el UNICO lugar donde se conectan calculos + clave_acceso +
-xml_builder + firmador_xades + sri_client. El endpoint (views.py) solo
-valida el request y llama a esta funcion.
-"""
 
 from datetime import date
+from decimal import Decimal
 from django.db import transaction, IntegrityError
 
 from comprobantes.models import Comprobante, DetalleComprobante
@@ -54,13 +39,18 @@ def emitir_comprobante(emisor, payload: dict) -> dict:
     """
     referencia_externa = payload.get('referencia_externa', '')
 
-    # --- Idempotencia: si esta venta ya se facturo, devuelve lo mismo ---
+    # --- Idempotencia real: solo se "cortocircuita" si YA esta AUTORIZADO.
+    # Cualquier otro estado (CREADO, FIRMADO, ENVIADO, ERROR, NO_AUTORIZADO)
+    # significa que el intento anterior no se completo -- se reintenta en
+    # vez de devolver para siempre el mismo fallo congelado.
     if referencia_externa:
         existente = Comprobante.objects.filter(
             emisor=emisor, referencia_externa=referencia_externa
         ).first()
         if existente:
-            return _serializar_resultado(existente)
+            if existente.estado == Comprobante.ESTADO_AUTORIZADO:
+                return _serializar_resultado(existente)
+            return _reintentar_existente(existente)
 
     if not emisor.certificado_p12:
         raise EmisionError(
@@ -109,12 +99,26 @@ def emitir_comprobante(emisor, payload: dict) -> dict:
             fp['unidad_tiempo'] = pago.get('unidad_tiempo', 'dias')
         formas_pago_sri.append(fp)
 
-    suma_pagos = sum(p['total'] for p in formas_pago_sri)
-    if abs(float(suma_pagos) - float(totales['importe_total'])) > 0.01:
+    # Tolerancia: tu POS suma el IVA sin redondear por linea y redondea al
+    # final, mientras el calculo fiscal redondea por linea (como el SRI).
+    # Pueden diferir por 1-2 centavos. Se tolera y se ajusta el ultimo
+    # pago para que el XML quede consistente: sum(pagos) == importeTotal.
+    suma_pagos = sum((p['total'] for p in formas_pago_sri), Decimal('0'))
+    diferencia = totales['importe_total'] - suma_pagos
+    if abs(diferencia) > Decimal('0.02'):
         raise EmisionError(
             f"La suma de los pagos ({suma_pagos}) no coincide con el total de la venta ({totales['importe_total']}).",
             codigo='pagos_no_cuadran',
         )
+    if diferencia != 0:
+        formas_pago_sri[-1]['total'] = formas_pago_sri[-1]['total'] + diferencia
+
+    # Lo que se guarda como respaldo debe reflejar los pagos ya ajustados
+    payload_guardar = dict(payload)
+    payload_guardar['pagos'] = [
+        {**dict(orig), 'total': fp['total']}
+        for orig, fp in zip(pagos_payload, formas_pago_sri)
+    ]
 
     # --- 3. Datos del comprador (opcional -> consumidor final) ---
     cliente = payload.get('cliente') or {}
@@ -149,7 +153,7 @@ def emitir_comprobante(emisor, payload: dict) -> dict:
                 total_sin_impuestos=totales['total_sin_impuestos'],
                 total_iva=totales['total_iva'],
                 importe_total=totales['importe_total'],
-                payload_original=payload,
+                payload_original=payload_guardar,
             )
         except IntegrityError:
             # carrera: otra peticion con la misma referencia_externa gano
@@ -207,6 +211,86 @@ def emitir_comprobante(emisor, payload: dict) -> dict:
     _aplicar_resultado_sri(comprobante, resultado_sri)
 
     return _serializar_resultado(comprobante)
+
+
+def _reintentar_existente(comprobante: Comprobante) -> dict:
+    """
+    Retoma un comprobante que quedo sin autorizar. NUNCA genera un nuevo
+    secuencial ni una nueva clave de acceso -- esos ya se "gastaron" en
+    el intento anterior y deben conservarse para no dejar huecos ni
+    duplicados ante el SRI.
+
+    Casos cubiertos:
+      - Nunca se firmo (p.ej. fallo FERNET_MASTER_KEY al momento de
+        firmar): se firma ahora con el XML ya generado.
+      - Se firmo pero el envio al SRI fallo o quedo EN_PROCESO: se
+        reenvia el MISMO xml_firmado tal cual (no se reconstruye).
+    """
+    emisor = comprobante.emisor
+
+    if not comprobante.xml_firmado:
+        if not emisor.certificado_p12:
+            raise EmisionError(
+                'Este emisor todavia no tiene un certificado .p12 cargado.',
+                codigo='sin_certificado',
+            )
+
+        xml_sin_firmar = comprobante.xml_generado
+        if not xml_sin_firmar:
+            # Caso extremo: ni siquiera el XML sin firmar quedo guardado.
+            # Se reconstruye desde los Detalle ya persistidos, SIN volver
+            # a calcular nada (los montos ya estan fijados en BD).
+            detalles = list(comprobante.detalles.all())
+            resumen_por_tarifa = _resumen_desde_detalles(detalles)
+            formas_pago_sri = [
+                {'codigo': FORMAS_PAGO_SRI.get(p.get('forma_pago'), '01'), 'total': p['total']}
+                for p in comprobante.payload_original.get('pagos', [])
+            ]
+            xml_sin_firmar = construir_xml_factura(
+                emisor=emisor, comprobante=comprobante, detalles=detalles,
+                resumen_por_tarifa=resumen_por_tarifa, formas_pago=formas_pago_sri,
+            )
+            comprobante.xml_generado = xml_sin_firmar
+
+        try:
+            p12_bytes = descifrar_bytes(bytes(emisor.certificado_p12))
+            password = descifrar_texto(emisor.certificado_password_cifrada)
+            xml_firmado = firmar_xades_bes(xml_sin_firmar, p12_bytes, password)
+        except Exception as exc:
+            comprobante.estado = Comprobante.ESTADO_ERROR
+            comprobante.mensaje_error = f'Error al firmar: {exc}'
+            comprobante.save()
+            raise EmisionError(f'Error al firmar el comprobante: {exc}', codigo='error_firma')
+
+        comprobante.xml_firmado = xml_firmado
+        comprobante.estado = Comprobante.ESTADO_FIRMADO
+        comprobante.save()
+    else:
+        xml_firmado = comprobante.xml_firmado
+
+    resultado_sri = procesar_comprobante_completo(
+        xml_firmado=xml_firmado,
+        clave_acceso=comprobante.clave_acceso,
+        ambiente=emisor.ambiente,
+    )
+    _aplicar_resultado_sri(comprobante, resultado_sri)
+    return _serializar_resultado(comprobante)
+
+
+def _resumen_desde_detalles(detalles):
+    """Reconstruye el resumen por tarifa de IVA a partir de DetalleComprobante ya guardados."""
+    resumen = {}
+    for d in detalles:
+        cod = d.codigo_porcentaje_iva
+        if cod not in resumen:
+            resumen[cod] = {
+                'codigo_porcentaje': cod,
+                'base_imponible': Decimal('0.00'),
+                'valor': Decimal('0.00'),
+            }
+        resumen[cod]['base_imponible'] += d.precio_total_sin_impuesto
+        resumen[cod]['valor'] += d.valor_iva
+    return list(resumen.values())
 
 
 def _aplicar_resultado_sri(comprobante: Comprobante, resultado_sri: dict):

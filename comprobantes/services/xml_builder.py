@@ -95,11 +95,28 @@ def construir_xml_factura(emisor, comprobante, detalles, resumen_por_tarifa, for
         _sub(impuesto, 'baseImponible', f'{d.precio_total_sin_impuesto:.2f}')
         _sub(impuesto, 'valor', f'{d.valor_iva:.2f}')
 
-    # ---- infoAdicional (opcional, util para el POS de origen) ----
+    # ---- infoAdicional ----
+    from django.conf import settings
+
+    campos_adicionales = []
     if comprobante.referencia_externa:
+        campos_adicionales.append(('ReferenciaPOS', comprobante.referencia_externa))
+
+    # RUC del desarrollador/distribuidor del sistema (Resolucion
+    # NAC-DGERCGC26-00000027): obligatorio en TODO comprobante,
+    # independientemente del emisor.
+    if settings.DISTRIBUIDOR_RUC:
+        campos_adicionales.append(('RUC Proveedor Sistema', settings.DISTRIBUIDOR_RUC))
+
+    # Leyenda RIMPE Emprendedor (solo si este emisor esta marcado como tal).
+    if emisor.es_rimpe_emprendedor:
+        campos_adicionales.append(('Regimen', 'CONTRIBUYENTE RÉGIMEN RIMPE'))
+
+    if campos_adicionales:
         info_adicional = etree.SubElement(factura, 'infoAdicional')
-        campo = etree.SubElement(info_adicional, 'campoAdicional', nombre='ReferenciaPOS')
-        campo.text = comprobante.referencia_externa
+        for nombre, valor in campos_adicionales:
+            campo = etree.SubElement(info_adicional, 'campoAdicional', nombre=nombre)
+            campo.text = valor
 
     return etree.tostring(
         factura, xml_declaration=True, encoding='UTF-8', standalone=True
