@@ -74,7 +74,7 @@ def construir_xml_factura(emisor, comprobante, detalles, resumen_por_tarifa, for
     for fp in formas_pago:
         pago = etree.SubElement(pagos, 'pago')
         _sub(pago, 'formaPago', fp['codigo'])
-        _sub(pago, 'total', f"{fp['total']:.2f}")
+        _sub(pago, 'total', f"{float(fp['total']):.2f}")
 
     # ---- detalles ----
     detalles_el = etree.SubElement(factura, 'detalles')
