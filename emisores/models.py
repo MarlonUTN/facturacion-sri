@@ -16,6 +16,7 @@ class Emisor(models.Model):
     codigo_punto_emision = models.CharField(max_length=3, default='001')
     obligado_contabilidad = models.BooleanField(default=False)
     contribuyente_especial = models.CharField(max_length=20, blank=True)
+    es_rimpe_emprendedor = models.BooleanField(default=False)
     ambiente = models.CharField(max_length=1, choices=AMBIENTE_CHOICES, default=AMBIENTE_PRUEBAS)
     certificado_p12 = models.BinaryField(null=True, blank=True)
     certificado_password_cifrada = models.CharField(max_length=500, blank=True)
