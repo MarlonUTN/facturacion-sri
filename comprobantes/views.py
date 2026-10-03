@@ -8,18 +8,15 @@ from .models import Comprobante
 from .serializers import EmitirComprobanteSerializer
 from .services.emision import emitir_comprobante, EmisionError
 from .services.ride_generator import generar_ride
+import logging
+import traceback
 
+logger = logging.getLogger(__name__)
 
 class EmitirComprobanteView(APIView):
     """
     POST /api/comprobantes/emitir/
-
-    El POS manda los datos de una venta (items, cliente opcional,
-    pagos), y este endpoint hace TODO el trabajo: calcula IVA, arma
-    el XML, lo firma, lo manda al SRI, y devuelve el resultado.
-
-    Requiere autenticacion por ApiKey (el emisor identificado por su
-    api_key es el que emite el comprobante).
+    ...
     """
 
     def post(self, request):
@@ -35,10 +32,18 @@ class EmitirComprobanteView(APIView):
                 {'detail': exc.mensaje, 'codigo': exc.codigo},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        except Exception as exc:
+            tb = traceback.format_exc()
+            logger.error("Error no manejado en /emitir/: %s", tb)
+            return Response(
+                {
+                    'detail': str(exc),
+                    'tipo': type(exc).__name__,
+                    'traceback': tb,
+                },
+                status=500,
+            )
 
-        # Si el SRI todavia no dio un estado final concluyente, igual
-        # devolvemos 200 (la peticion se proceso bien), pero el estado
-        # en el body indica que hay que consultar despues.
         return Response(resultado, status=status.HTTP_201_CREATED)
 
 
