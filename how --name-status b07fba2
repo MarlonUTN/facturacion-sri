@@ -1,0 +1,10 @@
+[33mcommit b07fba263bb5caf55382994fd3b038f7e37ff2f1[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m
+Author: MarlonUTN <marlonmyo26@gmail.com>
+Date:   Thu Oct 1 19:58:34 2026 -0500
+
+    Preparacion para produccion
+
+ comprobantes/services/emision.py        | 126 [32m++++++++++++++++++++++++++[m[31m------[m
+ comprobantes/services/ride_generator.py |   4 [32m+[m
+ comprobantes/services/xml_builder.py    |  23 [32m+++++[m[31m-[m
+ 3 files changed, 129 insertions(+), 24 deletions(-)

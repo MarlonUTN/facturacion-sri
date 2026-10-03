@@ -1,27 +1,4 @@
-"""
-Cliente SOAP para los webservices del SRI: Recepcion y Autorizacion
-de comprobantes electronicos.
 
-URLs oficiales (ambos ambientes usan el mismo formato de operaciones):
-
-    Pruebas:
-        Recepcion:    https://celcer.sri.gob.ec/comprobantes-electronicos-ws/RecepcionComprobantesOffline?wsdl
-        Autorizacion: https://celcer.sri.gob.ec/comprobantes-electronicos-ws/AutorizacionComprobantesOffline?wsdl
-
-    Produccion:
-        Recepcion:    https://cel.sri.gob.ec/comprobantes-electronicos-ws/RecepcionComprobantesOffline?wsdl
-        Autorizacion: https://cel.sri.gob.ec/comprobantes-electronicos-ws/AutorizacionComprobantesOffline?wsdl
-
-Flujo:
-    1. enviar_recepcion(xml_firmado, ambiente) -> el SRI valida que el
-       XML este bien formado y la firma sea correcta. Responde RECIBIDA
-       o DEVUELTA (con errores) -- esto NO es la autorizacion todavia,
-       solo confirma que lo recibio bien.
-    2. Si RECIBIDA, hay que ESPERAR unos segundos (el SRI procesa de
-       forma asincrona) y luego llamar a
-       consultar_autorizacion(clave_acceso, ambiente) -- puede devolver
-       EN PROCESO (hay que reintentar) o ya AUTORIZADO / NO AUTORIZADO.
-"""
 
 import base64
 import time
@@ -30,7 +7,9 @@ from dataclasses import dataclass
 
 import zeep
 from zeep.transports import Transport
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 import requests
+from requests.exceptions import ConnectionError as RequestsConnectionError
 
 logger = logging.getLogger(__name__)
 
@@ -59,14 +38,15 @@ class ResultadoAutorizacion:
     fecha_autorizacion: str = ''
     mensajes: list = None
     comprobante_autorizado: str = ''  # el XML devuelto por el SRI, ya con el sello de autorizacion
-
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=5),
+    retry=retry_if_exception_type(RequestsConnectionError),
+    reraise=True,
+)
 
 def _get_client(wsdl_url, timeout=30):
-    """
-    Cliente SOAP con timeout explicito -- el SRI puede ser lento o
-    caerse, y sin timeout una peticion se puede quedar colgada
-    indefinidamente bloqueando tu API.
-    """
+  
     session = requests.Session()
     transport = Transport(session=session, timeout=timeout, operation_timeout=timeout)
     return zeep.Client(wsdl=wsdl_url, transport=transport)
