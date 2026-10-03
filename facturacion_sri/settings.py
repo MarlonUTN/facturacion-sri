@@ -74,6 +74,8 @@ TEMPLATES = [
 WSGI_APPLICATION = 'facturacion_sri.wsgi.application'
 
 FERNET_MASTER_KEY = config('FERNET_MASTER_KEY', default='')
+
+DISTRIBUIDOR_RUC = config('DISTRIBUIDOR_RUC', default='')
 # Database
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
 
