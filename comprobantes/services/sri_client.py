@@ -48,7 +48,7 @@ class ResultadoAutorizacion:
 def _get_client(wsdl_url, timeout=10):
   
     session = requests.Session()
-    transport = Transport(session=session, timeout=timeout, operation_timeout=timeout)
+    transport = Transport(session=session, timeout=timeout, operation_timeout=30)
     return zeep.Client(wsdl=wsdl_url, transport=transport)
 
 
