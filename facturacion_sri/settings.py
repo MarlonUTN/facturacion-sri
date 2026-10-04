@@ -32,6 +32,7 @@ ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=Csv(
 # Application definition
 
 INSTALLED_APPS = [
+    'jazzmin',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -110,7 +111,12 @@ REST_FRAMEWORK = {
     ],
 }
 
-
+JAZZMIN_SETTINGS = {
+    "site_title": "Facturación SRI",
+    "site_header": "Facturación SRI",
+    "site_brand": "Facturación SRI",
+    "welcome_sign": "Panel de administración",
+}
 # Password validation
 # https://docs.djangoproject.com/en/6.1/ref/settings/#auth-password-validators
 
